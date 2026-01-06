@@ -27,4 +27,24 @@ router.post("/register-token", async (req, res) => {
   }
 });
 
+router.post("/test-notification", async (req, res) => {
+  const { token } = req.body;
+
+  const message = {
+    token,
+    notification: {
+      title: "🔥 Test Notification",
+      body: "Option A test successful",
+    },
+  };
+
+  try {
+    await admin.messaging().send(message);
+    res.json({ success: true, message: "Notification sent" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

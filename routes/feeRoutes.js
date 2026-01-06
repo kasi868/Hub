@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Fee = require("../models/Fees");
 const Student = require("../models/Student");
-const { sendFirebaseNotification } = require("../utils/sendNotification");
+const { sendFirebaseNotification } = require("../utils/notification");
 const moment = require("moment");
 const { generateMonthlyFees } = require("../utils/feeGenerator");
 
@@ -13,70 +13,6 @@ const { generateMonthlyFees } = require("../utils/feeGenerator");
 
 
 
-
-// router.post("/generate-month", async (req, res) => {
-//   try {
-//     const today = moment().startOf("day");
-
-//     const students = await Student.find().populate("roomId");
-
-//     let created = 0;
-
-//     for (const student of students) {
-//       const room = student.roomId;
-//       if (!room) continue;
-
-//       const lastFee = await Fee.findOne({ studentId: student._id })
-//         .sort({ feeDueDate: -1 });
-
-//       if (!lastFee) continue;
-
-//       // ⛔ Don't generate before due date
-//       if (moment(lastFee.feeDueDate).isAfter(today)) continue;
-
-//       const startDate = moment(lastFee.feeDueDate);
-
-//       const exists = await Fee.findOne({
-//         studentId: student._id,
-//         month: startDate.format("MMMM YYYY"),
-//       });
-
-//       if (!exists) {
-//         await Fee.create({
-//           hostelId: student.hostelId,
-//           studentId: student._id,
-//           roomId: room._id,
-
-//           studentName: student.name,
-//           roomNumber: room.roomNumber,
-//           bedNumber: student.bedNumber,
-//           mobile: student.mobile,
-
-//           month: startDate.format("MMMM YYYY"),
-//           monthNumber: startDate.month() + 1,
-//           year: startDate.year(),
-
-//           totalAmount: room.rentPerMonth,
-//           pendingAmount: room.rentPerMonth,
-
-//           paymentStatus: "Pending",
-//           paymentMode: "N/A",
-
-//           feeStartDate: startDate.toDate(),
-//           feeDueDate: startDate.clone().add(1, "month").toDate(),
-//         });
-
-//         created++;
-//       }
-//     }
-
-//     res.json({ message: `✅ ${created} new monthly fees generated` });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ message: "Fee generation failed" });
-//   }
-// });
-
 router.post("/generate-month", async (req, res) => {
   try {
     await generateMonthlyFees();
@@ -86,71 +22,78 @@ router.post("/generate-month", async (req, res) => {
   }
 });
 
-// async function sendFeeDueReminders() {
-//   const today = moment().startOf('day');
-//   const reminderDate = moment(today).add(3, 'days'); // 3 days before due
 
+// async function sendFeeDueReminders() {
+//   const today = moment().startOf("day");
+//   const reminderDate = moment(today).add(3, "days"); // 3 days before due
+
+//   // Fetch pending fees due within the reminder period
 //   const fees = await Fee.find({
 //     paymentStatus: "Pending",
-//     feeDueDate: { $lte: reminderDate.toDate(), $gte: today.toDate() }
+//     feeDueDate: { $lte: reminderDate.toDate(), $gte: today.toDate() },
 //   }).populate("studentId");
 
-//   const messages = fees
-//     .filter(f => f.studentId?.expoPushToken)
-//     .map(f => ({
-//       to: f.studentId.expoPushToken,
-//       sound: 'default',
-//       title: 'Fee Due Reminder 💸',
-//       body: `Hi ${f.studentName}, your fee for ${f.month} is due soon.`,
-//       data: { feeId: f._id },
-//     }));
+//   let sentCount = 0;
 
-//   if (messages.length) await sendPushNotifications(messages);
+//   for (let fee of fees) {
+//     const token = fee.studentId?.fcmToken;
+//     if (!token) continue; // Skip if no token
 
-//   console.log(`Sent ${messages.length} fee reminders`);
+//     const title = "Fee Due Reminder 💸";
+//     const body = `Hi ${fee.studentId.name}, your fee for ${fee.month} is due soon.`;
+
+//     try {
+//       await sendFirebaseNotification(token, title, body);
+//       sentCount++;
+//     } catch (err) {
+//       console.error(
+//         `Failed to send notification for student ${fee.studentId.name}:`,
+//         err
+//       );
+//     }
+//   }
+
+//   console.log(`🔔 Sent ${sentCount} fee reminders`);
 // }
 
-// // Example: run daily at 9 AM using cron
-// const cron = require("node-cron");
-// cron.schedule("0 9 * * *", () => {
-//   console.log("Running daily fee reminder cron...");
-//   sendFeeDueReminders();
-// });
 
 
 async function sendFeeDueReminders() {
-  const today = moment().startOf("day");
-  const reminderDate = moment(today).add(3, "days"); // 3 days before due
+  console.log("🔔 Fee reminder cron running at", new Date());
 
-  // Fetch pending fees due within the reminder period
+  const today = moment().startOf("day");
+
   const fees = await Fee.find({
     paymentStatus: "Pending",
-    feeDueDate: { $lte: reminderDate.toDate(), $gte: today.toDate() },
-  }).populate("studentId");
-
-  let sentCount = 0;
+  }).populate("studentId hostelId");
 
   for (let fee of fees) {
-    const token = fee.studentId?.fcmToken;
-    if (!token) continue; // Skip if no token
+    const dueDate = moment(fee.feeDueDate).startOf("day");
+    const diffDays = dueDate.diff(today, "days");
 
-    const title = "Fee Due Reminder 💸";
-    const body = `Hi ${fee.studentId.name}, your fee for ${fee.month} is due soon.`;
+    // ✅ From 3 days before until due date
+    if (diffDays >= 0 && diffDays <= 3) {
+      const student = fee.studentId;
 
-    try {
-      await sendFirebaseNotification(token, title, body);
-      sentCount++;
-    } catch (err) {
-      console.error(
-        `Failed to send notification for student ${fee.studentId.name}:`,
-        err
+      if (!student?.fcmToken) {
+        console.log("❌ No token for student:", student?.name);
+        continue;
+      }
+
+      await sendFirebaseNotification(
+        student.fcmToken,
+        "Fee Due Reminder 💸",
+        `Hi ${student.name}, your hostel fee for ${fee.month} is due on ${dueDate.format(
+          "DD MMM"
+        )}`
+      );
+
+      console.log(
+        `✅ Reminder sent to ${student.name} (${diffDays} days left)`
       );
     }
   }
-
-  console.log(`🔔 Sent ${sentCount} fee reminders`);
 }
-
 router.get("/hostel/:hostelId", async (req, res) => {
   try {
     const { hostelId } = req.params;
@@ -177,16 +120,28 @@ router.put("/update-status/:id", async (req, res) => {
     fee.paymentStatus = paymentStatus;
     fee.paymentMode = paymentMode;
     // if (paymentStatus === "Paid") fee.paidDate = new Date();
-     if (paymentStatus === "Paid") {
-      fee.paidDate = new Date();
+    //  if (paymentStatus === "Paid") {
+    //   fee.paidDate = new Date();
 
-      // ⭐ REMOVE NOTIFICATIONS IF STUDENT PAID
-      // await Notification.deleteMany({
-      //   studentId: fee.studentId,
-      //   // resolved: false,
-      // });
-    }
+    // }
+if (paymentStatus === "Paid") {
+  fee.paidDate = new Date();
 
+  // 🔔 Notify Admin
+  const admin = await Admin.findOne({ hostelId: fee.hostelId });
+
+  if (admin?.fcmToken) {
+    await sendFirebaseNotification(
+      admin.fcmToken,
+      "Fee Paid ✅",
+      `Student ${fee.studentName} has paid ₹${fee.totalAmount} for ${fee.month}`
+    );
+
+    console.log("✅ Admin notified for payment");
+  } else {
+    console.log("❌ Admin token missing");
+  }
+}
     await fee.save();
     res.json({ message: "Payment updated ✅", fee });
   } catch (error) {

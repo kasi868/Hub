@@ -79,6 +79,11 @@ app.get('/', (req, res) => {
   res.send('API is running...');
 });
 
+app.post("/api/test-fee-reminder", async (req, res) => {
+  await sendFeeDueReminders();
+  res.send("Fee reminder triggered manually");
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
