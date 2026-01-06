@@ -37,17 +37,11 @@ cron.schedule("0 1 * * *", async () => {
 });
 
 // cron.schedule("0 8 * * *", async () => {
-//   try {
-//     console.log("⏳ Daily fee cron running");
-
-//     await axios.post("http://192.168.29.144:5000/api/fees/generate-month");
-//     await sendFeeDueReminders(); // ⭐ ADD THIS
-//   } catch (err) {
-//     console.error("❌ Cron failed", err.message);
-//   }
+//   console.log("🔔 Running fee reminder cron");
+//   await sendFeeDueReminders();
 // });
-// ⏰ Daily at 8 AM – Send reminders
-cron.schedule("0 8 * * *", async () => {
+
+cron.schedule("30 16 * * *", async () => {
   console.log("🔔 Running fee reminder cron");
   await sendFeeDueReminders();
 });
